@@ -1,0 +1,568 @@
+Option Explicit
+
+Sub CSRforCSP()
+'
+' Macro3 Macro
+
+
+
+' Keyboard Shortcut: Ctrl+q
+'This version incorporates additional days into the due date if customer is flagged as such according to their
+'interest indicator on column A
+
+
+
+'This version now prompts for the user for the date of the CSR, if the date is left blank it defaults to
+'today's date, retreives the raw CSR based on the date entered, copies the credit CSR worksheet from
+'the raw CSR and then runs through the calculations as commented below
+'
+' Edits the CSR report and then calculates whether or not the CL and the flexible check rule buffer
+' together give sufficient credit for customer so that we don't need to review the account for a CL increase
+
+        Dim Today As Date
+        Dim DueDay As Integer
+        Dim DueDate As Date
+        Dim DueMonth As Integer
+        Dim CurrentDay As Integer
+        Dim CurrentMonth As Integer
+        Dim TotalDSO As Integer
+        Dim DaysToPmt As Integer
+        Dim CurrentDSO As Integer
+        Dim DSO As Integer
+        Dim Term As String
+        Dim CurrentWeekday As Integer
+        Dim DaysToAdd As Integer
+        Dim RowNum As Integer
+        Dim FRP As String
+        Dim DSOLeft As Integer
+        Dim DSOcarry As Integer
+        Dim CurrentBalance As Long
+        Dim AvgDailyBal As Long
+        Dim AdditionalPurch As Long
+        Dim TotalBalance As Long
+        Dim FRPCL As Long
+        Dim CreateTicketOrNot As String
+        Dim TermCode As String
+        Dim holidays As Variant
+        Dim weeklyleftover As Integer
+        Dim semimoleftover As Integer
+        Dim moleftover As Integer
+        Dim TodaysMonthName As String
+        Dim TodaysMonthNum As Integer
+        Dim TodaysDay As Integer
+        Dim TodaysYear As Integer
+        Dim PathName1 As String
+        Dim FolderName1 As String
+        Dim filename As String
+        Dim scriptname As String
+        
+        Dim FinalPathName As String
+        Dim CSRws As Worksheet
+        Dim TheString As String, TheDate As Date
+        Dim endofmonth As Date
+        Dim endofmonthday As Integer
+        Dim pastdue As Long
+
+        Dim intindic As String
+        Dim intindicdays As Integer
+        Dim intindictest As String
+        
+        Dim HSornot As String
+        
+        Dim defaultPD As Long
+        
+        
+        
+        Application.Calculation = xlCalculationAutomatic
+        Application.DisplayAlerts = False
+        
+        On Error Resume Next
+        Worksheets("Credit FRP Crd Limit > 80% ").Delete
+        On Error GoTo 0
+
+        TheString = Application.InputBox("Enter the CSR date as ""MM/DD/YYYY"" ONLY. Leave blank for today's date.")
+        If IsDate(TheString) Then
+            TheDate = DateValue(TheString)
+        ElseIf TheString = "" Then
+            TheDate = Date
+        Else
+            MsgBox "Invalid date"
+            Exit Sub
+        End If
+        
+        Today = TheDate
+        TodaysMonthNum = Month(Today)
+        TodaysMonthName = MonthName(TodaysMonthNum)
+        TodaysDay = Day(Today)
+        TodaysYear = Year(Today)
+        CurrentDay = Day(Today)
+        CurrentMonth = Month(Today)
+        PathName1 = "\\vlfcpsvr02\vlf$\Departments\Credit_And_AR\RegionalSoxReports\Credit Status Report\"
+        'FolderName1 = TodaysMonthNum & ") " & TodaysMonthName & " " & TodaysYear
+        FolderName1 = TodaysMonthName & " " & TodaysYear
+        filename = "\" & TodaysYear & Format(Month(Today), "00") & Format(Day(Today), "00") & ".xlsx"
+        
+        FinalPathName = PathName1 & TodaysYear & "\ABDCSR\" & FolderName1 & filename
+        
+        scriptname = Dir(ThisWorkbook.FullName)
+        
+     
+        
+        
+        
+        If Dir$(FinalPathName) <> "" Then
+            Workbooks.Open filename:=FinalPathName
+        Else
+            MsgBox "There is no CSR with the date entered, please enter a different date!"
+            Exit Sub
+        End If
+        
+        Sheets("Credit FRP Crd Limit > 80% ").Select
+        Sheets("Credit FRP Crd Limit > 80% ").Copy Before:=Workbooks( _
+            scriptname).Sheets(2)
+        Windows(TodaysYear & Format(Month(Today), "00") & Format(Day(Today), "00") & ".xlsx").Activate
+        ActiveWindow.Close
+        
+        holidays = Array(#5/29/2017#, #7/4/2017#, #9/4/2017#, #10/9/2017#, #11/11/2017#, #11/23/2017#, #12/25/2017#)
+        
+        RowNum = 4
+        FRP = 1
+        
+        Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 16) = "=LEFT(N4,2)"
+        Range("P4").Select
+        Selection.AutoFill Destination:=Range("P4:P200")
+        Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 17) = "=SUMPRODUCT(MID(0&N4,LARGE(INDEX(ISNUMBER(--MID(N4,ROW($1:$25),1))* ROW($1:$25),0),ROW($1:$25))+1,1)*10^ROW($1:$25)/10)"
+        Range("Q4").Select
+        Selection.AutoFill Destination:=Range("Q4:Q200")
+       
+    Do While FRP <> ""
+        
+        intindic = Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 1)
+        HSornot = Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 3)
+        TermCode = Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 14)
+        FRP = Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 4)
+        Term = Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 16)
+        DaysToAdd = Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 17)
+        CurrentBalance = Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 7)
+        FRPCL = Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 10)
+        pastdue = Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 8)
+        
+        HSornot = Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 3)
+        
+        intindictest = Right(intindic, 1)
+        
+        If IsNumeric(intindictest) = True Then
+            intindicdays = intindictest
+        Else
+            intindicdays = 0
+        End If
+        
+
+        
+        If Term = "ZS" Or (Term = "ZX" And DaysToAdd >= 10) Then
+                                   
+            DSO = 8 + DaysToAdd
+
+            'If Today < DateSerial(Year(Today), Month(Today) + 1, DaysToAdd - 15) Then
+
+            
+
+
+            If CurrentDay <= 15 And DaysToAdd <= 15 Then
+                
+                DueDate = DateSerial(Year(Today), Month(Today), DaysToAdd)
+                If Today >= DueDate Then
+                    DueDate = DateSerial(Year(Today), Month(Today), DaysToAdd + 15)
+                End If
+            ElseIf CurrentDay <= 15 And DaysToAdd > 15 Then
+                                            
+                endofmonth = DateSerial(Year(Today), Month(Today), 0)
+                endofmonthday = Day(endofmonth)
+                'DueDate = DateSerial(Year(Today), Month(Today), 15 - DaysToAdd)
+                
+                If (DaysToAdd / 15) > 1 Then
+                
+                    semimoleftover = DaysToAdd Mod 15
+                
+                Else
+                    
+                    semimoleftover = 0
+                
+                End If
+ 
+                DueDate = DateSerial(Year(Today), Month(Today), (semimoleftover + 15))
+                
+            ElseIf CurrentDay > 15 And DaysToAdd <= 15 Then
+            
+                DueDate = DateSerial(Year(Today), Month(Today) + 1, DaysToAdd)
+                    
+            ElseIf CurrentDay > 15 And DaysToAdd > 15 Then
+                        
+                'endofmonth = DateSerial(Year(Today), Month(Today), 0)
+                'endofmonthday = Day(endofmonth)
+                If (DaysToAdd / 15) > 1 Then
+                
+                    semimoleftover = DaysToAdd Mod 15
+                
+                Else
+                    
+                    semimoleftover = 0
+                
+                End If
+                
+                DueDate = DateSerial(Year(Today), Month(Today) + 1, semimoleftover)
+   
+            End If
+        
+                If Today >= DueDate Then
+                    DueDate = DateSerial(Year(DueDate), Month(DueDate) + 1, Day(DueDate) - 15)
+                ElseIf Today <= DueDate - 15 Then
+                    DueDate = DateSerial(Year(DueDate), Month(DueDate) - 1, Day(DueDate) + 15)
+                End If
+                
+                DueDate = WorksheetFunction.WorkDay(DueDate - 1, 1, holidays)
+                
+                DSOLeft = DueDate - Today
+
+        ElseIf Term = "ZF" Or (Term = "ZX" And DaysToAdd = 7) Then
+            
+            If Term = "ZX" Then
+                DSO = 2 + DaysToAdd
+                
+                If Weekday(Today) < 4 Then
+                      
+                    DSOLeft = 4 - Weekday(Today)
+                    DueDate = Today + DSOLeft
+                    DueDate = WorksheetFunction.WorkDay(DueDate - 1, 1, holidays)
+                
+                ElseIf Weekday(Today) = 4 Then
+                      
+                    DSOLeft = 0
+                    DueDate = Today
+                    
+                    DueDate = WorksheetFunction.WorkDay(DueDate - 1, 1, holidays)
+                          
+                End If
+                
+            Else
+                
+                'If (DaysToAdd / 7) <= 1 Then
+                    'weeklyleftover = 0
+                'Else
+                weeklyleftover = DaysToAdd Mod 7
+                'End If
+                DSO = 4 + DaysToAdd
+      
+                If Weekday(Today) <> 6 + weeklyleftover Then
+                      
+                          DSOLeft = 6 + weeklyleftover - Weekday(Today)
+                          
+                          'MsgBox (Weekday(Today))
+                          
+                          DueDate = Application.WorksheetFunction.WorkDay((Today + DSOLeft) - 1, 1, holidays)
+            
+                ElseIf Weekday(Today) = 6 + weeklyleftover Then
+                      
+                          DSOLeft = 0
+                          DueDate = Application.WorksheetFunction.WorkDay(Today - 1, 1, holidays)
+                          
+                End If
+    
+            End If
+            
+            
+                If DueDate - 7 > Today Then
+                    DueDate = DueDate - 7
+                End If
+                
+                If Today >= DueDate Then
+                    DueDate = DueDate + 7
+                End If
+                
+                
+            
+        ElseIf Term = "ZM" Then
+            
+            weeklyleftover = DaysToAdd Mod 7
+            DSO = 4 + DaysToAdd
+            
+            If Weekday(Today) <> 2 + weeklyleftover - 7 Then
+                  
+                    DSOLeft = 9 + weeklyleftover - 7 - Weekday(Today)
+                    DueDate = Application.WorksheetFunction.WorkDay((Today + DSOLeft) - 1, 1, holidays)
+            
+            ElseIf Weekday(Today) = 2 + weeklyleftover - 7 Then
+                  
+                    DSOLeft = 0
+                    DueDate = Application.WorksheetFunction.WorkDay(Today - 1, 1, holidays)
+                      
+            End If
+            
+            If DueDate - 7 > Today Then
+                DueDate = DueDate - 7
+            End If
+            If Today >= DueDate Then
+                DueDate = DueDate + 7
+            End If
+           
+        ElseIf Term = "ZH" Then
+        
+            DSO = 15 + DaysToAdd
+            If DaysToAdd > 30 Then
+                DueDay = DaysToAdd - 30
+            Else
+                DueDay = DaysToAdd
+            End If
+    
+            If CurrentDay <= DaysToAdd Then
+                
+                'moleftover = DaysToAdd Mod 30
+                'If moleftover = 0 Then
+                    DueDate = DateSerial(Year(Today), Month(Today), DueDay)
+               ' Else
+                    'DueDate = DateSerial(Year(Today), Month(Today), DaysToAdd + moleftover)
+                'End If
+                DueDate = WorksheetFunction.WorkDay(DueDate - 1, 1, holidays)
+
+                DSOLeft = DueDate - Today
+                
+            ElseIf CurrentDay > DaysToAdd Then
+            
+                DueDate = DateSerial(Year(Today), Month(Today) + 1, DueDay)
+                DueDate = WorksheetFunction.WorkDay(DueDate - 1, 1, holidays)
+                DSOLeft = DueDate - Today
+                
+            End If
+            
+            If Today >= DueDate Then
+                DueDate = DateSerial(Year(DueDate), Month(DueDate) + 1, DueDay)
+            End If
+                      
+
+        ElseIf Term = "ZI" Then
+            
+            DSO = DaysToAdd
+            DSOLeft = 1
+            DueDate = Today
+            DueDate = WorksheetFunction.WorkDay(DueDate - 1, 1, holidays)
+ 
+        Else
+  
+            DSO = 1
+            DueDate = Today
+            DueDate = WorksheetFunction.WorkDay(DueDate - 1, 1, holidays)
+
+        End If
+
+        DSOcarry = DSO - DSOLeft
+        If DSOcarry = 0 Then
+            DSOcarry = 1
+        End If
+        
+        AvgDailyBal = CurrentBalance / DSOcarry
+        AdditionalPurch = DSOLeft * AvgDailyBal
+        TotalBalance = CurrentBalance + AdditionalPurch - pastdue
+        DueDate = DueDate + intindicdays
+        DueDate = WorksheetFunction.WorkDay(DueDate - 1, 1, holidays)
+        
+        
+        If TotalBalance > (1.25 * FRPCL) Then
+            
+            If Term <> "ZS" And Term <> "ZF" And Term <> "ZH" And Term <> "ZI" And Term <> "ZX" And Term <> "ZM" Then
+                CreateTicketOrNot = "Manual review"
+            Else
+                CreateTicketOrNot = "Please create ticket"
+            End If
+            
+        ElseIf TotalBalance <= (1.25 * FRPCL) Then
+            
+            If Term <> "ZS" And Term <> "ZF" And Term <> "ZH" And Term <> "ZI" And Term <> "ZX" And Term <> "ZM" Then
+                CreateTicketOrNot = "Manual review"
+            Else
+                CreateTicketOrNot = "Ignore"
+            End If
+        End If
+    
+        Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 18) = AvgDailyBal
+        Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 19) = CreateTicketOrNot
+        Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 20) = DueDate
+        'Sheets("Credit FRP Crd Limit > 80% ").Cells(RowNum, 21) = TotalBalance
+        
+        RowNum = RowNum + 1
+        
+    
+    Loop
+    
+    'Automatic filtering to show customers with no PD balance, not High Risk, not 86 Hold or 01 Check Rule,
+    'greater than 95% utilization on Flex rule only
+    
+    Rows("1:2").Select
+    Selection.Delete Shift:=xlUp
+    If Not ActiveSheet.AutoFilterMode Then
+        ActiveSheet.Range("A3").AutoFilter
+    End If
+
+    ActiveWorkbook.Worksheets("Credit FRP Crd Limit > 80% ").AutoFilter.Sort. _
+        SortFields.Clear
+    ActiveWorkbook.Worksheets("Credit FRP Crd Limit > 80% ").AutoFilter.Sort. _
+        SortFields.Add Key:=Range("H1"), SortOn:=xlSortOnValues, Order:= _
+        xlDescending, DataOption:=xlSortNormal
+    With ActiveWorkbook.Worksheets("Credit FRP Crd Limit > 80% ").AutoFilter.Sort
+        .Header = xlYes
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .SortMethod = xlPinYin
+        .Apply
+    End With
+    
+    Range("U2").Select
+    'ActiveCell.FormulaR1C1 = "=IF(RC[-18]=""Health Sys"",0,RC[-13]/RC[-11])"
+    ActiveCell.FormulaR1C1 = "=RC[-13]/RC[-11]"
+    
+    
+    Range("U2").Select
+    Selection.AutoFill Destination:=Range("U2:U500")
+    
+    
+    Range("U:U").Select
+    Selection.Copy
+    Selection.PasteSpecial Paste:=xlPasteValues, Operation:=xlNone, SkipBlanks _
+        :=False, Transpose:=False
+    
+    Rows("1:1").Select
+    Range("H1").Activate
+    Selection.AutoFilter
+    Rows("1:1").Select
+    Range("H1").Activate
+    Selection.AutoFilter
+
+    ActiveSheet.Range("$A$1:$U$500").RemoveDuplicates Columns:=4, Header:=xlYes
+    
+    
+    'Range("T1").Select
+    'ActiveCell.FormulaR1C1 = "PD as a % of CL"
+    
+
+    
+    Range("A1:U1").Select
+    Range(Selection, Selection.End(xlDown)).Select
+    Selection.Copy
+    Selection.PasteSpecial Paste:=xlPasteValues, Operation:=xlNone, SkipBlanks _
+        :=False, Transpose:=False
+    
+    ActiveSheet.Range("$A$1:$U$500").AutoFilter Field:=6, Criteria1:=Array( _
+        "Low Risk", "Low/Medium Risk", "Medium Risk", "Medium/High Risk", _
+        "New Business Partner"), Operator:=xlFilterValues
+    ActiveSheet.Range("$A$1:$U$500").AutoFilter Field:=11, Criteria1:= _
+        "Flexible Credit Check"
+   ' ActiveWorkbook.Worksheets("Credit FRP Crd Limit > 80% ").AutoFilter.Sort. _
+        SortFields.Clear
+    ActiveWorkbook.Worksheets("Credit FRP Crd Limit > 80% ").AutoFilter.Sort. _
+        SortFields.Add Key:=Range("I1:I500"), SortOn:=xlSortOnValues, Order:= _
+        xlDescending, DataOption:=xlSortNormal
+    With ActiveWorkbook.Worksheets("Credit FRP Crd Limit > 80% ").AutoFilter.Sort
+        .Header = xlYes
+        .MatchCase = False
+        .Orientation = xlTopToBottom
+        .SortMethod = xlPinYin
+        .Apply
+    End With
+    Columns("R:R").Select
+    Selection.Style = "Currency"
+    Selection.NumberFormat = "_($* #,##0_);_($* (#,##0);_($* ""-""??_);_(@_)"
+    'Columns("U:U").Select
+    'Selection.Style = "Currency"
+    'Selection.NumberFormat = "_($* #,##0_);_($* (#,##0);_($* ""-""??_);_(@_)"
+    
+    ActiveSheet.Range("$B$1:$U$500").AutoFilter Field:=9, Criteria1:=">=" & Worksheets("Settings").Range("G1").Value, _
+        Operator:=xlAnd
+    ActiveSheet.Range("$B$1:$V$500").AutoFilter Field:=21, Criteria1:="<=" & Worksheets("Settings").Range("C1").Value
+    
+    
+    
+    
+ 
+    'Hides columns A, E, F, G, J, L, O-Q, T
+    
+    Columns("U:U").Select
+    Selection.EntireColumn.Hidden = True
+    Columns("A:A").Select
+    Selection.EntireColumn.Hidden = True
+    Columns("B:B").Select
+    Selection.EntireColumn.Hidden = True
+    Columns("H:H").Select
+    Selection.EntireColumn.Hidden = True
+    Columns("M:M").Select
+    Selection.EntireColumn.Hidden = True
+    Columns("P:R").Select
+    Selection.EntireColumn.Hidden = True
+    Range("T1").Select
+    ActiveCell.FormulaR1C1 = "Next Payment Due Date"
+    Range("T1").Select
+    With Selection
+        .HorizontalAlignment = xlLeft
+        .VerticalAlignment = xlBottom
+        .WrapText = True
+        .Orientation = 0
+        .AddIndent = False
+        .IndentLevel = 0
+        .ShrinkToFit = False
+        .ReadingOrder = xlContext
+        .MergeCells = False
+    End With
+    Columns("T:T").ColumnWidth = 9.71
+    Range("S1").Select
+    ActiveCell.FormulaR1C1 = "Create ticket?"
+    Range("S2").Select
+    Columns("K:K").Select
+    Selection.EntireColumn.Hidden = True
+    Columns("G:G").Select
+    Selection.EntireColumn.Hidden = True
+    Columns("F:F").Select
+    Selection.EntireColumn.Hidden = True
+    ActiveWindow.ScrollColumn = 2
+    
+    'Conditional formatting for the "Create ticket?" column
+    
+    Columns("S:S").Select
+    Selection.FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, _
+        Formula1:="=""Ignore"""
+    Selection.FormatConditions(Selection.FormatConditions.Count).SetFirstPriority
+    With Selection.FormatConditions(1).Interior
+        .PatternColorIndex = xlAutomatic
+        .Color = 5296274
+        .TintAndShade = 0
+    End With
+    Selection.FormatConditions(1).StopIfTrue = False
+    Columns("S:S").Select
+    Selection.FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, _
+        Formula1:="=""Please create ticket"""
+    Selection.FormatConditions(Selection.FormatConditions.Count).SetFirstPriority
+    With Selection.FormatConditions(1).Interior
+        .PatternColorIndex = xlAutomatic
+        .Color = 255
+        .TintAndShade = 0
+    End With
+    Selection.FormatConditions(1).StopIfTrue = False
+    Columns("S:S").Select
+    Selection.FormatConditions.Add Type:=xlCellValue, Operator:=xlEqual, _
+        Formula1:="=""Manual review"""
+    Selection.FormatConditions(Selection.FormatConditions.Count).SetFirstPriority
+    With Selection.FormatConditions(1).Interior
+        .PatternColorIndex = xlAutomatic
+        .Color = 255
+        .TintAndShade = 0
+    End With
+    Selection.FormatConditions(1).StopIfTrue = False
+    
+    Columns("S:S").EntireColumn.AutoFit
+
+    Application.DisplayAlerts = False
+
+
+   ' ActiveWorkbook.SaveAs FileName:= _
+        "\\vlfcpsvr02\vlf$\Departments\Credit_And_AR\Large Account Summary\5) CSR\Final CSR\" & TodaysMonthNum _
+        & "-" & TodaysYear & "\Final " & TodaysYear & Format(Month(Today), "00") & Format(Day(Today), "00") & ".xlsm" _
+        , FileFormat:=xlOpenXMLWorkbookMacroEnabled, CreateBackup:=False
+      
+End Sub
